@@ -1,0 +1,9 @@
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.4
+torch>=2.2
+flwr>=1.8
+opacus>=1.4
+shap>=0.45
+matplotlib>=3.8
+seaborn>=0.13

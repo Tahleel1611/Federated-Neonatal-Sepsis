@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build/distribution
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Archives
+*.zip
+
+# Large datasets and database dumps
+mimic-iii-clinical-database-1.4/
+paediatric-intensive-care-database-1.1.0/
+results/datasets/
+results/cache/
+
+# Trained models and heavy outputs
+results/*.pt
+results/*.csv
+results/*.png
+results/analysis/
+results/lead_time/
+results/plots/
+
+# Keep placeholder if needed
+!results/.gitkeep
+
+# Top-level generated artifacts
+champion_inference_results.csv
+smoke_inference_results.csv
+smoke_inference_results_focal.csv
+precision_recall_curve.png
+threshold_dynamics.png
+optimized_confusion_matrices.png
+clinical_validation_grid.png
