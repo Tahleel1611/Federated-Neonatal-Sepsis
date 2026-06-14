@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,15 +9,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 
 from src.config import ModelConfig
 from src.constants import MODEL_FEATURE_COLUMNS
 from src.models.transformer_lstm import TransformerLSTMSepsisModel
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CHECKPOINT_CANDIDATES = (
     "results/federated_global_model_final.pt",
     "results/centralized_model_latest.pt",
 )
+
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 
 
 class DeploymentError(RuntimeError):
@@ -54,43 +60,66 @@ def _env_float(name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class ModelBundle:
-    model: TransformerLSTMSepsisModel
+    model: nn.Module
     checkpoint_path: Path
     seq_len_steps: int
     threshold: float
+    is_dummy: bool = False
 
 
-def resolve_checkpoint_path(explicit: str | None = None) -> Path:
+def resolve_checkpoint_path(explicit: str | None = None) -> Path | None:
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit))
-
     env_path = _env_optional_str("SEPSIS_CHECKPOINT_PATH", None)
     if env_path:
         candidates.append(Path(env_path))
-
     for candidate in DEFAULT_CHECKPOINT_CANDIDATES:
         candidates.append(Path(candidate))
-
     for candidate in candidates:
         if candidate.exists():
             return candidate
+    return None
 
-    candidate_list = ", ".join(str(candidate) for candidate in candidates)
-    raise FileNotFoundError(
-        "No model checkpoint found. Set SEPSIS_CHECKPOINT_PATH or mount one of: "
-        f"{candidate_list}"
+
+def _make_dummy_bundle() -> ModelBundle:
+    """Return a randomly-initialised model bundle for demo / health-check purposes."""
+    logger.warning(
+        "No model checkpoint found. Starting in DEMO mode with a random model. "
+        "Predictions will NOT be clinically meaningful."
+    )
+    model_cfg = ModelConfig()
+    model = TransformerLSTMSepsisModel(
+        input_size=len(MODEL_FEATURE_COLUMNS),
+        d_model=model_cfg.d_model,
+        num_heads=model_cfg.num_heads,
+        transformer_layers=model_cfg.transformer_layers,
+        lstm_hidden=model_cfg.lstm_hidden,
+        lstm_layers=model_cfg.lstm_layers,
+        dropout=0.0,
+    )
+    model.eval()
+    return ModelBundle(
+        model=model,
+        checkpoint_path=Path("demo_dummy"),
+        seq_len_steps=_env_int("SEPSIS_SEQ_LEN_STEPS", 12),
+        threshold=_env_float("SEPSIS_PREDICTION_THRESHOLD", 0.5),
+        is_dummy=True,
     )
 
 
 def load_model_bundle(checkpoint_path: str | None = None) -> ModelBundle:
     resolved_path = resolve_checkpoint_path(checkpoint_path)
+
+    if resolved_path is None:
+        return _make_dummy_bundle()
+
     try:
         checkpoint = torch.load(resolved_path, map_location="cpu", weights_only=True)
     except TypeError:
         checkpoint = torch.load(resolved_path, map_location="cpu")
-    model_cfg = ModelConfig()
 
+    model_cfg = ModelConfig()
     model = TransformerLSTMSepsisModel(
         input_size=int(checkpoint.get("input_size", len(MODEL_FEATURE_COLUMNS))),
         d_model=int(checkpoint.get("d_model", model_cfg.d_model)),
@@ -101,6 +130,7 @@ def load_model_bundle(checkpoint_path: str | None = None) -> ModelBundle:
         dropout=float(checkpoint.get("dropout", model_cfg.dropout)),
     )
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    model.eval()
 
     seq_len_steps = int(
         checkpoint.get(
@@ -114,34 +144,32 @@ def load_model_bundle(checkpoint_path: str | None = None) -> ModelBundle:
             _env_float("SEPSIS_PREDICTION_THRESHOLD", 0.5),
         )
     )
-
     return ModelBundle(
         model=model,
         checkpoint_path=resolved_path,
         seq_len_steps=seq_len_steps,
         threshold=threshold,
+        is_dummy=False,
     )
 
 
 def rows_to_sequence(rows: list[dict[str, Any]], seq_len_steps: int) -> np.ndarray:
     if not rows:
         raise DeploymentError("At least one row is required for prediction.")
-
     frame = pd.DataFrame(rows)
     if "Timestamp" in frame.columns:
         frame["Timestamp"] = pd.to_datetime(frame["Timestamp"], errors="coerce")
         frame = frame.sort_values("Timestamp", kind="stable")
-
     missing = [column for column in MODEL_FEATURE_COLUMNS if column not in frame.columns]
     for column in missing:
         frame[column] = 0.0
-
     feature_frame = frame[MODEL_FEATURE_COLUMNS].apply(pd.to_numeric, errors="coerce").fillna(0.0)
     if len(feature_frame) < seq_len_steps:
-        raise DeploymentError(
-            f"Need at least {seq_len_steps} rows, but received {len(feature_frame)}."
+        pad = pd.DataFrame(
+            np.zeros((seq_len_steps - len(feature_frame), len(MODEL_FEATURE_COLUMNS))),
+            columns=MODEL_FEATURE_COLUMNS,
         )
-
+        feature_frame = pd.concat([pad, feature_frame], ignore_index=True)
     sequence = feature_frame.tail(seq_len_steps).to_numpy(dtype=np.float32)
     return sequence[np.newaxis, ...]
 
@@ -158,6 +186,7 @@ def predict_from_rows(
 
     effective_seq_len = int(seq_len_steps or bundle.seq_len_steps)
     effective_threshold = float(bundle.threshold if threshold is None else threshold)
+
     sequence = rows_to_sequence(rows, effective_seq_len)
 
     with torch.no_grad():
@@ -175,4 +204,5 @@ def predict_from_rows(
         "rows_used": int(sequence.shape[1]),
         "feature_columns": list(MODEL_FEATURE_COLUMNS),
         "checkpoint_path": str(bundle.checkpoint_path),
+        "demo_mode": bundle.is_dummy,
     }
