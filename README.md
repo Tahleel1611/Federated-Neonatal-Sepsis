@@ -41,6 +41,42 @@ python -m src.fl.client --hospital_id H3
 python -m src.xai.shap_explainer
 ```
 
+## Deployment
+
+This repo deploys as two parts:
+
+1. **Backend**: the FastAPI app in `api/app.py`, run in a Python host or container.
+2. **Frontend**: the static demo in `frontend/`, deployable to Vercel as a static site.
+
+### Backend
+
+Build and run the container:
+
+```powershell
+docker build -t fedneo-guard .
+docker run -p 8000:8000 -e SEPSIS_CHECKPOINT_PATH=/models/federated_global_model_final.pt fedneo-guard
+```
+
+Required runtime settings:
+
+| Variable | Purpose |
+| --- | --- |
+| `SEPSIS_CHECKPOINT_PATH` | Path to a saved `.pt` checkpoint |
+| `SEPSIS_SEQ_LEN_STEPS` | Fallback sequence length when the checkpoint does not store one |
+| `SEPSIS_PREDICTION_THRESHOLD` | Fallback decision threshold |
+
+The API exposes `GET /health`, `GET /model-info`, `GET /example-payload`, and `POST /predict`.
+
+### Vercel frontend
+
+Set the Vercel project root to `frontend/`. The page lets you enter the backend URL, load an example request, and send predictions to the API.
+
+### Notes
+
+- Training, federated learning, and explainability scripts remain local/batch jobs.
+- The API expects feature-ready rows with the columns in `src/constants.py`.
+- If you want to deploy on a platform other than Docker/Cloud Run/Railway/Fly.io, point it at the same `uvicorn api.app:app` entrypoint.
+
 ## Implemented Scope
 
 - Phase 1: vitals/static extraction, HRV (SDNN, RMSSD), FFill + KNN imputation, federated partitioning

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FedNeo-Guard Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <h1>FedNeo-Guard Demo</h1>
+        <p>Point this page at the Python API and send a feature-sequence payload.</p>
+      </header>
+
+      <section class="card">
+        <label for="apiUrl">Backend URL</label>
+        <input id="apiUrl" type="url" value="http://127.0.0.1:8000" />
+
+        <div class="actions">
+          <button id="loadExample">Load example payload</button>
+          <button id="predict">Predict</button>
+        </div>
+
+        <label for="payload">Request body</label>
+        <textarea id="payload" spellcheck="false"></textarea>
+      </section>
+
+      <section class="card">
+        <h2>Response</h2>
+        <pre id="result">No request sent yet.</pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
