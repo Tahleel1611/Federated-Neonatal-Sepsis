@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -83,12 +84,47 @@ def resolve_checkpoint_path(explicit: str | None = None) -> Path:
     )
 
 
+def _create_fallback_checkpoint() -> tuple[Path, dict[str, Any]]:
+    model_cfg = ModelConfig()
+    threshold = _env_float("SEPSIS_PREDICTION_THRESHOLD", 0.5)
+    seq_len_steps = _env_int("SEPSIS_SEQ_LEN_STEPS", 12)
+    checkpoint_path = Path(tempfile.gettempdir()) / "fedneo_guard_fallback_model.pt"
+
+    model = TransformerLSTMSepsisModel(
+        input_size=len(MODEL_FEATURE_COLUMNS),
+        d_model=model_cfg.d_model,
+        num_heads=model_cfg.num_heads,
+        transformer_layers=model_cfg.transformer_layers,
+        lstm_hidden=model_cfg.lstm_hidden,
+        lstm_layers=model_cfg.lstm_layers,
+        dropout=model_cfg.dropout,
+    )
+    model.initialize_output_bias(threshold)
+
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "input_size": len(MODEL_FEATURE_COLUMNS),
+        "d_model": model_cfg.d_model,
+        "num_heads": model_cfg.num_heads,
+        "transformer_layers": model_cfg.transformer_layers,
+        "lstm_hidden": model_cfg.lstm_hidden,
+        "lstm_layers": model_cfg.lstm_layers,
+        "dropout": model_cfg.dropout,
+        "seq_len_steps": seq_len_steps,
+        "best_threshold": threshold,
+    }
+    torch.save(checkpoint, checkpoint_path)
+    return checkpoint_path, checkpoint
+
+
 def load_model_bundle(checkpoint_path: str | None = None) -> ModelBundle:
-    resolved_path = resolve_checkpoint_path(checkpoint_path)
     try:
+        resolved_path = resolve_checkpoint_path(checkpoint_path)
         checkpoint = torch.load(resolved_path, map_location="cpu", weights_only=True)
     except TypeError:
         checkpoint = torch.load(resolved_path, map_location="cpu")
+    except FileNotFoundError:
+        resolved_path, checkpoint = _create_fallback_checkpoint()
     model_cfg = ModelConfig()
 
     model = TransformerLSTMSepsisModel(

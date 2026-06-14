@@ -65,6 +65,8 @@ Required runtime settings:
 | `SEPSIS_SEQ_LEN_STEPS` | Fallback sequence length when the checkpoint does not store one |
 | `SEPSIS_PREDICTION_THRESHOLD` | Fallback decision threshold |
 
+If no checkpoint is mounted or `SEPSIS_CHECKPOINT_PATH` is not set to a valid file, the API now generates a temporary fallback checkpoint at startup so the container can still boot for demo and smoke-test use.
+
 The API exposes `GET /health`, `GET /model-info`, `GET /example-payload`, and `POST /predict`.
 
 ### Vercel frontend
