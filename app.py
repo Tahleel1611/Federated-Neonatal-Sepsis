@@ -387,6 +387,8 @@ def render_prediction_results(bundle, input_data):
     
     probability = result["probability"]
     label = result["label"]
+        # Convert binary label (0 or 1) to string for display
+    label_str = "positive" if label == 1 else "negative"
     
     # ====================================================================
     # Display raw probability as metric
@@ -476,7 +478,7 @@ def render_prediction_results(bundle, input_data):
             f"{probability:.4f}",
             f"{OPTIMIZED_THRESHOLD:.4f}",
             f"{(probability - OPTIMIZED_THRESHOLD):+.4f}",
-            label.upper(),
+            label_str.upper(),
             f"{bundle.seq_len_steps}",
             "5 minutes per step",
             f"{bundle.seq_len_steps * 5} minutes ({bundle.seq_len_steps * 5 / 60:.1f} hours)",
