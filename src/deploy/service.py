@@ -143,25 +143,22 @@ def _create_fallback_checkpoint() -> tuple[Path, dict[str, Any]]:
 
 
 def load_model_bundle(checkpoint_path: str | None = None) -> ModelBundle:
-<<<<<<< HEAD
-=======
     resolved_path = resolve_checkpoint_path(checkpoint_path)
-
     if resolved_path is None:
-        return _make_dummy_bundle()
-
->>>>>>> 166c7bf696777c3d8966c09e287fe5637d679286
-    try:
-        resolved_path = resolve_checkpoint_path(checkpoint_path)
-        checkpoint = torch.load(resolved_path, map_location="cpu", weights_only=True)
-    except TypeError:
-        checkpoint = torch.load(resolved_path, map_location="cpu")
-<<<<<<< HEAD
-    except FileNotFoundError:
+        if DEMO_MODE:
+            return _make_dummy_bundle()
         resolved_path, checkpoint = _create_fallback_checkpoint()
-    model_cfg = ModelConfig()
-=======
->>>>>>> 166c7bf696777c3d8966c09e287fe5637d679286
+        logger.warning("No model checkpoint found. Using a temporary fallback checkpoint at %s.", resolved_path)
+    else:
+        try:
+            checkpoint = torch.load(resolved_path, map_location="cpu", weights_only=True)
+        except TypeError:
+            checkpoint = torch.load(resolved_path, map_location="cpu")
+        except FileNotFoundError:
+            if DEMO_MODE:
+                return _make_dummy_bundle()
+            resolved_path, checkpoint = _create_fallback_checkpoint()
+            logger.warning("Checkpoint disappeared during load. Using fallback checkpoint at %s.", resolved_path)
 
     model_cfg = ModelConfig()
     model = TransformerLSTMSepsisModel(

@@ -45,8 +45,8 @@ python -m src.xai.shap_explainer
 
 This repo deploys as two parts:
 
-1. **Backend**: the FastAPI app in `api/app.py`, run in a Python host or container.
-2. **Frontend**: the static demo in `frontend/`, deployable to Vercel as a static site.
+1. **API backend**: the FastAPI app in `api/app.py`, run in a Python host or container.
+2. **Clinical UI**: the Streamlit app in `app.py`, deployable to Streamlit Community Cloud.
 
 ### Backend
 
@@ -69,9 +69,28 @@ If no checkpoint is mounted or `SEPSIS_CHECKPOINT_PATH` is not set to a valid fi
 
 The API exposes `GET /health`, `GET /model-info`, `GET /example-payload`, and `POST /predict`.
 
-### Vercel frontend
+### Streamlit UI
+
+Run locally with:
+
+```powershell
+streamlit run app.py
+```
+
+For Streamlit Community Cloud, set the app entrypoint to `app.py`. The UI loads the federated checkpoint if present, otherwise it boots in demo mode with a temporary fallback model.
+
+### Static frontend
+
+The legacy static demo remains in `frontend/` for direct API testing.
 
 Set the Vercel project root to `frontend/`. The page lets you enter the backend URL, load an example request, and send predictions to the API.
+
+### Free FL demo flow
+
+1. Start the Flower server locally with `python -m src.fl.server --bind_address 0.0.0.0:8080`.
+2. Start an Ngrok TCP tunnel for port `8080`.
+3. Launch each Colab client with `python -m src.fl.client --server_address <ngrok-host:port> --hospital_id H1` and `H2`.
+4. Save the final checkpoint to `results/federated_global_model_final.pt` and deploy `app.py` to Streamlit Cloud.
 
 ### Notes
 

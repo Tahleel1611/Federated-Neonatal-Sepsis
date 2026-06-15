@@ -191,8 +191,8 @@ def main(
     initial_positive_prior: float = 0.0014,
 ):
     cfg = FederatedConfig()
-    if server_address:
-        cfg.server_address = server_address
+    bind_address = server_address or "0.0.0.0:8080"
+    cfg.server_address = bind_address
     if rounds is not None:
         cfg.rounds = int(rounds)
 
@@ -223,7 +223,8 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--server_address", type=str, default=None)
+    parser.add_argument("--server_address", type=str, default=None, help="Legacy alias for --bind_address")
+    parser.add_argument("--bind_address", type=str, default=None, help="Address Flower binds to (default: 0.0.0.0:8080)")
     parser.add_argument("--output_path", type=str, default="results/fl_round_metrics.csv")
     parser.add_argument("--rounds", type=int, default=None)
     parser.add_argument("--min_clients", type=int, default=2)
@@ -232,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--initial_positive_prior", type=float, default=0.0014)
     args = parser.parse_args()
     main(
-        args.server_address,
+        args.bind_address or args.server_address,
         args.output_path,
         args.rounds,
         args.min_clients,
