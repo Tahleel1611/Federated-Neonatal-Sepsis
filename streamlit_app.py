@@ -13,10 +13,10 @@ professional independent clinical judgment.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 
 from src.constants import MODEL_FEATURE_COLUMNS
@@ -40,7 +40,7 @@ RISK_COLORS = {
     "low": "#27AE60",       # Green - Under threshold
 }
 
-OPTIMIZED_THRESHOLD = 0.5753
+DECISION_THRESHOLD = 0.5753
 THRESHOLD_MARGIN = 0.10  # 10% margin for borderline range
 
 # Reference ranges for clinical context
@@ -60,6 +60,140 @@ CLINICAL_REFERENCE_RANGES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+def safe_upper(value: Any, default: str = "UNKNOWN") -> str:
+    return normalize_text(value, default=default).upper()
+
+
+def resolve_decision_threshold(bundle: Any | None = None) -> float:
+    """Resolve the single threshold used throughout the UI."""
+
+    bundle_threshold = getattr(bundle, "threshold", None)
+    if isinstance(bundle_threshold, (int, float)) and np.isfinite(bundle_threshold):
+        if 0.0 <= float(bundle_threshold) <= 1.0 and abs(float(bundle_threshold) - DECISION_THRESHOLD) <= 1e-6:
+            return float(bundle_threshold)
+        logger.info(
+            "Ignoring bundle threshold %s in favor of validated clinical threshold %.4f",
+            bundle_threshold,
+            DECISION_THRESHOLD,
+        )
+    return DECISION_THRESHOLD
+
+
+def normalize_summary_item(item: Any) -> tuple[str, str]:
+    """Safely normalize summary rows into a (label, value) pair."""
+
+    if item is None:
+        return "Unknown", "N/A"
+
+    if isinstance(item, dict):
+        label = item.get("label", item.get("Metric", item.get("name", item.get("key", "Unknown"))))
+        value = item.get("value", item.get("Value", item.get("result", item.get("text", "N/A"))))
+        return normalize_summary_item((label, value))
+
+    if isinstance(item, (list, tuple)):
+        if len(item) >= 2:
+            label, value = item[0], item[1]
+            return normalize_text(label, default="Unknown") or "Unknown", normalize_text(value, default="N/A") or "N/A"
+        if len(item) == 1:
+            return normalize_summary_item(item[0])
+        return "Unknown", "N/A"
+
+    return normalize_text(item, default="Unknown") or "Unknown", "N/A"
+
+
+def safe_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        if value is None:
+            return default
+        parsed = float(value)
+        if np.isfinite(parsed):
+            return parsed
+    except (TypeError, ValueError):
+        return default
+    return default
+
+
+def sanitize_prediction_result(result: Any, threshold: float) -> dict[str, Any] | None:
+    """Validate and normalize the prediction payload before rendering."""
+
+    if not isinstance(result, dict):
+        st.error("❌ Prediction returned malformed output. Please retry the prediction.")
+        return None
+
+    probability = safe_float(result.get("probability"))
+    if probability is None:
+        st.error("❌ Prediction output is missing a valid probability value.")
+        return None
+
+    resolved_threshold = safe_float(result.get("threshold"), default=threshold) or threshold
+    label_value = result.get("label")
+    if isinstance(label_value, str):
+        label_clean = label_value.strip()
+        label = int(label_clean) if label_clean in {"0", "1"} else int(probability >= resolved_threshold)
+    elif isinstance(label_value, (int, float, np.integer, np.floating)):
+        label = int(label_value)
+    else:
+        label = int(probability >= resolved_threshold)
+
+    risk_level = normalize_text(result.get("risk_level"), default="unknown")
+    if not risk_level or risk_level == "unknown":
+        risk_level = "high" if label else "low"
+
+    rows_used = safe_float(result.get("rows_used"), default=0.0)
+    seq_len_steps = safe_float(result.get("seq_len_steps"), default=0.0)
+
+    sanitized = {
+        "probability": probability,
+        "threshold": resolved_threshold,
+        "label": label,
+        "risk_level": risk_level,
+        "confidence": safe_float(result.get("confidence"), default=max(probability, 1 - probability)),
+        "seq_len_steps": int(seq_len_steps) if seq_len_steps is not None else 0,
+        "rows_used": int(rows_used) if rows_used is not None else 0,
+        "feature_columns": result.get("feature_columns") if isinstance(result.get("feature_columns"), list) else [],
+        "checkpoint_path": normalize_text(result.get("checkpoint_path"), default="unknown"),
+    }
+    return sanitized
+
+
+def build_summary_rows(result: dict[str, Any], threshold: float, seq_len_steps: int) -> list[tuple[str, str]]:
+    """Return a safe summary table payload from either model metadata or fallback values."""
+
+    probability = safe_float(result.get("probability"), default=0.0) or 0.0
+    risk_level = safe_upper(result.get("risk_level"), default="UNKNOWN")
+    raw_items = result.get("summary_items")
+
+    if raw_items is None:
+        raw_items = result.get("summary")
+
+    fallback_items: list[Any] = [
+        {"label": "Predicted Probability", "value": f"{probability:.4f}"},
+        ("Decision Threshold", f"{threshold:.4f}"),
+        ["Distance from Threshold", f"{(probability - threshold):+.4f}"],
+        {"label": "Risk Category", "value": risk_level},
+        {"label": "Sequence Length (steps)", "value": f"{seq_len_steps}"},
+        {"label": "Interval Duration", "value": "5 minutes per step"},
+        {"label": "Total Observation Window", "value": f"{seq_len_steps * 5} minutes ({seq_len_steps * 5 / 60:.1f} hours)"},
+    ]
+
+    if raw_items is None:
+        raw_items = fallback_items
+    elif not isinstance(raw_items, (list, tuple)):
+        st.warning("Prediction summary payload was malformed; a safe fallback summary is being shown.")
+        raw_items = fallback_items
+
+    normalized_rows = [normalize_summary_item(item) for item in raw_items]
+    valid_rows = [(label, value) for label, value in normalized_rows if normalize_text(label, default="")]
+    return valid_rows if valid_rows else [normalize_summary_item(item) for item in fallback_items]
 
 
 # ============================================================================
@@ -120,6 +254,7 @@ def render_header():
 def render_model_status(bundle, error):
     """Display model loading status professionally."""
     col1, col2, col3 = st.columns(3)
+    decision_threshold = resolve_decision_threshold(bundle)
     
     if error:
         with col1:
@@ -138,7 +273,7 @@ def render_model_status(bundle, error):
         st.info(f"📊 Sequence Length: {bundle.seq_len_steps} steps (5-minute intervals)")
     
     with col3:
-        st.info(f"🎯 Decision Threshold: {bundle.threshold:.4f}")
+        st.info(f"🎯 Decision Threshold: {decision_threshold:.4f}")
     
     return True
 
@@ -366,25 +501,31 @@ def render_prediction_results(bundle, input_data):
     """Render color-coded risk stratification and prediction outputs."""
     
     st.markdown("### 📊 Prediction Results")
+    decision_threshold = resolve_decision_threshold(bundle)
+    seq_len_steps = max(1, int(getattr(bundle, "seq_len_steps", 12) or 12))
     
     # Construct prediction request matching the model's expected input shape
     # The model expects a sequence of seq_len_steps rows
-    rows = [input_data.copy() for _ in range(bundle.seq_len_steps)]
+    rows = [input_data.copy() for _ in range(seq_len_steps)]
     
     try:
         result = predict_from_rows(
             bundle,
             rows,
-            seq_len_steps=bundle.seq_len_steps,
-            threshold=OPTIMIZED_THRESHOLD,
+            seq_len_steps=seq_len_steps,
+            threshold=decision_threshold,
         )
     except Exception as e:
         st.error(f"❌ Prediction failed: {str(e)}")
         logger.exception("Prediction error")
         return
     
-    probability = result["probability"]
-    label = result["label"]
+    sanitized_result = sanitize_prediction_result(result, decision_threshold)
+    if sanitized_result is None:
+        return
+
+    probability = sanitized_result["probability"]
+    confidence = sanitized_result["confidence"] or max(probability, 1 - probability)
     
     # ====================================================================
     # Display raw probability as metric
@@ -395,20 +536,20 @@ def render_prediction_results(bundle, input_data):
         st.metric(
             "Sepsis Risk Probability",
             f"{probability:.4f}",
-            delta=f"{(probability - OPTIMIZED_THRESHOLD):.4f} vs threshold",
+            delta=f"{(probability - decision_threshold):.4f} vs threshold",
         )
     
     with col2:
         st.metric(
             "Decision Threshold",
-            f"{OPTIMIZED_THRESHOLD:.4f}",
+            f"{decision_threshold:.4f}",
             help="Optimized boundary for 80%+ sensitivity"
         )
     
     with col3:
         st.metric(
             "Model Confidence",
-            f"{max(probability, 1 - probability) * 100:.1f}%",
+            f"{confidence * 100:.1f}%",
             help="Distance from 50% decision boundary"
         )
     
@@ -418,12 +559,12 @@ def render_prediction_results(bundle, input_data):
     # Risk Stratification with Color-Coded Alerts
     # ====================================================================
     
-    if probability >= OPTIMIZED_THRESHOLD:
+    if probability >= decision_threshold:
         # HIGH RISK
         st.error(
             f"🚨 **HIGH RISK** – Sepsis Risk Probability: {probability:.4f}\n\n"
             f"The patient's predicted sepsis probability **exceeds the optimized "
-            f"decision threshold ({OPTIMIZED_THRESHOLD:.4f})**. \n\n"
+            f"decision threshold ({decision_threshold:.4f})**. \n\n"
             f"**Recommended Action:** Immediate clinical review and consideration of "
             f"empirical sepsis workup and antimicrobial therapy is strongly advised. "
             f"This signal should trigger escalation to senior clinical staff for "
@@ -431,7 +572,7 @@ def render_prediction_results(bundle, input_data):
             icon="🚨"
         )
     
-    elif probability >= (OPTIMIZED_THRESHOLD - THRESHOLD_MARGIN):
+    elif probability >= (decision_threshold - THRESHOLD_MARGIN):
         # BORDERLINE RISK
         st.warning(
             f"⚠️ **BORDERLINE RISK** – Sepsis Risk Probability: {probability:.4f}\n\n"
@@ -460,28 +601,13 @@ def render_prediction_results(bundle, input_data):
     # ====================================================================
     
     st.markdown("#### Result Summary")
-    summary_data = {
-        "Metric": [
-            "Predicted Probability",
-            "Decision Threshold",
-            "Distance from Threshold",
-            "Risk Category",
-            "Sequence Length (steps)",
-            "Interval Duration",
-            "Total Observation Window",
-        ],
-        "Value": [
-            f"{probability:.4f}",
-            f"{OPTIMIZED_THRESHOLD:.4f}",
-            f"{(probability - OPTIMIZED_THRESHOLD):+.4f}",
-            label.upper(),
-            f"{bundle.seq_len_steps}",
-            "5 minutes per step",
-            f"{bundle.seq_len_steps * 5} minutes ({bundle.seq_len_steps * 5 / 60:.1f} hours)",
-        ],
-    }
-    
-    st.dataframe(summary_data, use_container_width=True, hide_index=True)
+    summary_rows = build_summary_rows(sanitized_result, decision_threshold, seq_len_steps)
+    if not summary_rows:
+        st.warning("Prediction summary could not be rendered safely.")
+        return
+
+    summary_frame = pd.DataFrame(summary_rows, columns=["Metric", "Value"])
+    st.dataframe(summary_frame, use_container_width=True, hide_index=True)
 
 
 # ============================================================================

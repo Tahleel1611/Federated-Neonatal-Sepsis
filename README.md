@@ -46,7 +46,7 @@ python -m src.xai.shap_explainer
 This repo deploys as two parts:
 
 1. **API backend**: the FastAPI app in `api/app.py`, run in a Python host or container.
-2. **Clinical UI**: the Streamlit app in `app.py`, deployable to Streamlit Community Cloud.
+2. **Clinical UI**: the Streamlit entrypoint in `app.py`, which delegates to the main dashboard implementation in `streamlit_app.py`.
 
 ### Backend
 
@@ -77,7 +77,7 @@ Run locally with:
 streamlit run app.py
 ```
 
-For Streamlit Community Cloud, set the app entrypoint to `app.py`. The UI loads the federated checkpoint if present, otherwise it boots in demo mode with a temporary fallback model.
+For Streamlit Community Cloud, set the app entrypoint to `app.py`. The shim keeps deployment stable while the dashboard logic stays in `streamlit_app.py`. The UI loads the federated checkpoint if present, otherwise it boots in demo mode with a temporary fallback model.
 
 ### Static frontend
 
