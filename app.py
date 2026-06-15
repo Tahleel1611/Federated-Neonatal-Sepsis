@@ -1,11 +1,8 @@
-# Entry point redirect for Streamlit Cloud
-# Streamlit Cloud is configured to run app.py — this file forwards to streamlit_app.py
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import runpy
-import os
-import sys
+_here = os.path.dirname(os.path.abspath(__file__))
+_app = os.path.join(_here, "streamlit_app.py")
 
-# Ensure the repo root is on the path
-sys.path.insert(0, os.path.dirname(__file__))
-
-runpy.run_path("streamlit_app.py", run_name="__main__")
+with open(_app, "r", encoding="utf-8") as _f:
+    exec(compile(_f.read(), _app, "exec"), {"__file__": _app, "__name__": "__main__"})
