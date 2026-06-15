@@ -1,8 +1,14 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# app.py - Entry point for Streamlit Cloud
+# This file imports and executes the main dashboard from streamlit_app
 
-_here = os.path.dirname(os.path.abspath(__file__))
-_app = os.path.join(_here, "streamlit_app.py")
+import sys
+from pathlib import Path
 
-with open(_app, "r", encoding="utf-8") as _f:
-    exec(compile(_f.read(), _app, "exec"), {"__file__": _app, "__name__": "__main__"})
+# Ensure repo root is on path
+sys.path.insert(0, str(Path(__file__).parent.absolute()))
+
+# Import and run the main application
+from streamlit_app import main
+
+if __name__ == "__main__":
+    main()
